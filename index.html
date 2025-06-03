@@ -317,16 +317,17 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
         import { getDatabase, ref, set, get, onValue, push, remove, update, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js';
 
-        // TODO: Replace with your Firebase config
-       const firebaseConfig = {
-      apiKey: "AIzaSyC1PocQMYJZP0ABWxeoiUNF7C5mHgsDjpk",
-      authDomain: "initialcontact-66089-default-rtdb.asia-southeast1.firebasedatabase.app/",
-      projectId: "initialcontact-66089",
-      storageBucket: "initialcontact-66089-default-rtdb.asia-southeast1.firebasedatabase.app/",
-      messagingSenderId: "964931937041",
-      appId: "1:964931937041:web:a6c67c1f3de5d7f55b62b0",
-      measurementId: "G-7LL14YVJCE"
-};
+        // Fixed Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyC1PocQMYJZP0ABWxeoiUNF7C5mHgsDjpk",
+            authDomain: "initialcontact-66089.firebaseapp.com",
+            databaseURL: "https://initialcontact-66089-default-rtdb.asia-southeast1.firebasedatabase.app/",
+            projectId: "initialcontact-66089",
+            storageBucket: "initialcontact-66089.appspot.com",
+            messagingSenderId: "964931937041",
+            appId: "1:964931937041:web:a6c67c1f3de5d7f55b62b0",
+            measurementId: "G-7LL14YVJCE"
+        };
 
         // Initialize Firebase
         let app, database;
@@ -349,7 +350,7 @@
     </script>
 
     <script>
-        // Game Database
+        // Game Database - Fixed AFL section
         const gameDatabase = {
             worldSports: [
                 {
@@ -454,14 +455,14 @@
                     ]
                 },
                 {
-                    initials: "M.V.",
-                    answer: "Max Verstappen",
+                    initials: "P.D.",
+                    answer: "Patrick Dangerfield",
                     clues: [
-                        "Dutch Formula 1 driver",
-                        "Red Bull Racing driver",
-                        "Multiple world champion",
-                        "Son of Jos Verstappen",
-                        "Youngest F1 race winner"
+                        "Geelong Cats midfielder",
+                        "2016 Brownlow Medal winner",
+                        "Former Adelaide Crows player",
+                        "Six-time All-Australian",
+                        "Known for his versatility"
                     ]
                 }
             ],
@@ -656,7 +657,8 @@
             lobbyListener: null,
             gameListener: null,
             playerScore: 0,
-            offlineMode: false
+            offlineMode: false,
+            maxRounds: 10
         };
 
         let timerInterval;
@@ -672,6 +674,13 @@
         function initGame() {
             showScreen('lobby');
             gameState.playerId = generatePlayerId();
+            
+            // Add enter key support
+            document.getElementById('guessInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    submitGuess();
+                }
+            });
         }
 
         function generatePlayerId() {
@@ -695,6 +704,21 @@
             gameState.currentScreen = screenName;
         }
 
+        function cleanupListeners() {
+            if (gameState.lobbyListener) {
+                gameState.lobbyListener();
+                gameState.lobbyListener = null;
+            }
+            if (gameState.gameListener) {
+                gameState.gameListener();
+                gameState.gameListener = null;
+            }
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
         async function createLobby() {
             const playerName = document.getElementById('playerName').value.trim();
             
@@ -703,8 +727,12 @@
                 return;
             }
 
+            if (playerName.length > 20) {
+                alert('Name must be 20 characters or less');
+                return;
+            }
+
             if (!window.firebase || !window.firebase.database) {
-                // Fallback to offline mode
                 createOfflineLobby(playerName);
                 return;
             }
@@ -761,13 +789,17 @@
                 return;
             }
 
+            if (playerName.length > 20) {
+                alert('Name must be 20 characters or less');
+                return;
+            }
+
             if (!lobbyCode) {
                 alert('Please enter a lobby code');
                 return;
             }
 
             if (!window.firebase || !window.firebase.database) {
-                // Fallback to offline mode
                 joinOfflineLobby(playerName, lobbyCode);
                 return;
             }
@@ -791,6 +823,14 @@
                 if (lobbyData.status !== 'waiting') {
                     document.getElementById('lobbyStatus').style.display = 'block';
                     document.getElementById('lobbyStatus').innerHTML = '❌ Game already in progress.';
+                    return;
+                }
+
+                // Check if player limit reached (optional - you can set a limit)
+                const playerCount = Object.keys(lobbyData.players || {}).length;
+                if (playerCount >= 8) {
+                    document.getElementById('lobbyStatus').style.display = 'block';
+                    document.getElementById('lobbyStatus').innerHTML = '❌ Lobby is full.';
                     return;
                 }
 
@@ -833,6 +873,8 @@
                     // Check if game should start
                     if (lobbyData.status === 'playing' && gameState.currentScreen === 'category') {
                         startGameFromLobby(lobbyData);
+                    } else if (lobbyData.status === 'round' && gameState.currentScreen === 'scoreboard') {
+                        startNewRound(lobbyData);
                     }
                 }
             });
@@ -851,39 +893,3 @@
                 }];
             } else {
                 const players = gameState.currentLobby.players || {};
-                playerList = Object.entries(players).map(([id, player]) => player);
-            }
-
-            const container = document.getElementById('playersInLobby');
-            container.innerHTML = `
-                <h3>Players in Lobby: ${gameState.lobbyCode}</h3>
-                ${playerList.map(player => `
-                    <div class="player-item">
-                        <span>${player.name} ${player.isLeader ? '👑' : ''}</span>
-                        <span>Score: ${player.score || 0}</span>
-                    </div>
-                `).join('')}
-                <p style="margin-top: 15px; opacity: 0.8;">${playerList.length} player(s) connected</p>
-            `;
-        }
-
-        async function selectCategory(category) {
-            if (!gameState.isLeader) {
-                document.getElementById('categoryStatus').style.display = 'block';
-                document.getElementById('categoryStatus').textContent = 'Only the party leader can select the category.';
-                return;
-            }
-
-            if (!window.firebase || !window.firebase.database || gameState.offlineMode) {
-                // Offline mode
-                selectOfflineCategory(category);
-                return;
-            }
-
-            try {
-                const questions = generateGameQuestions(category);
-                
-                const lobbyRef = window.firebase.ref(window.firebase.database, `lobbies/${gameState.lobbyCode}`);
-                await window.firebase.update(lobbyRef, {
-                    category: category,
-                    status: 'playing
